@@ -120,6 +120,17 @@
     const CHOP_REACH = 80; // world units
     const CHOP_RATE = 140; // HP/s
 
+    // wood yield: map tree radius to 4-6 wood (4 for smallest, 6 for largest)
+    const MIN_TREE_R = 18;
+    const MAX_TREE_R = 53; // size = 18 + floor(rand*36) -> max 53
+    function woodYieldFor(tree) {
+      if (!tree) return 0;
+      const t = Math.max(MIN_TREE_R, Math.min(MAX_TREE_R, tree.r));
+      const norm = (t - MIN_TREE_R) / (MAX_TREE_R - MIN_TREE_R); // 0..1
+      const yieldAmt = 4 + Math.round(norm * 2); // 4..6
+      return Math.max(4, Math.min(6, yieldAmt));
+    }
+
     function dropWoodAt(wx, wy) {
       if (player.wood <= 0) return false;
       player.wood -= 1;
@@ -338,7 +349,8 @@
         } else {
           chopTarget.hp -= CHOP_RATE * dt;
           if (chopTarget.hp <= 0) {
-            const yieldAmt = Math.max(1, Math.round(chopTarget.r / 8));
+            // give 4-6 wood depending on tree size (4 = smallest, 6 = biggest)
+            const yieldAmt = woodYieldFor(chopTarget);
             player.wood += yieldAmt;
             updateWoodUI();
             removeTree(chopTarget);
