@@ -70,7 +70,8 @@
         const hue = 100 + Math.floor(hashFloat(cx,cy,i+17) * 40);
         const sat = 40 + Math.floor(hashFloat(cx,cy,i+19) * 30);
         const hp = Math.round(size * 6);
-        trees.push({ x: px, y: py, r: size, hue, sat, hp });
+        const id = key + ':' + i; // unique-ish id for reliable removal
+        trees.push({ x: px, y: py, r: size, hue, sat, hp, id });
       }
       chunks.set(key, trees);
     }
@@ -214,13 +215,17 @@
     canvas.addEventListener('mouseleave', () => { isMouseDown = false; chopTarget = null; });
 
     function removeTree(t) {
-      const cx = Math.floor(t.x / CHUNK_SIZE);
-      const cy = Math.floor(t.y / CHUNK_SIZE);
-      const key = chunkKey(cx,cy);
-      const list = chunks.get(key);
-      if (!list) return;
-      const idx = list.indexOf(t);
-      if (idx !== -1) list.splice(idx,1);
+      // Try to remove by object identity first (fast path), then by id, then by proximity.
+      for (const [key, list] of chunks.entries()) {
+        const idx = list.indexOf(t);
+        if (idx !== -1) { list.splice(idx, 1); return; }
+        if (t && t.id) {
+          const idIdx = list.findIndex(x => x.id === t.id);
+          if (idIdx !== -1) { list.splice(idIdx, 1); return; }
+        }
+        const posIdx = list.findIndex(x => Math.abs(x.x - t.x) < 0.1 && Math.abs(x.y - t.y) < 0.1 && Math.abs(x.r - t.r) < 0.1);
+        if (posIdx !== -1) { list.splice(posIdx, 1); return; }
+      }
     }
 
     function resolveCollisions(px,py) {
