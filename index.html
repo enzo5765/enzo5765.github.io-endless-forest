@@ -151,45 +151,76 @@
 
     function drawTreeSprite(tree) {
       const s = worldToScreen(tree.x, tree.y);
-      const px = Math.max(4, Math.round(tree.r / 5));
+      const px = Math.max(3, Math.round(tree.r / 5));
 
       const canopy = [
-        '0001111111000',
-        '0111111111100',
-        '1111111111110',
-        '1111111111110',
-        '0111111111100',
-        '0011111111000',
-        '0001111110000'
+        '0000111111110000',
+        '0001111111110000',
+        '0011111111111000',
+        '0111111111111100',
+        '0111111111111100',
+        '0111111111111100',
+        '1111111111111110',
+        '1111111111111110',
+        '0111111111111100',
+        '0011111111111000',
+        '0001111111110000',
+        '0000111111100000'
       ];
 
-      const centerX = s.x - (canopy[0].length * px) / 2;
-      const centerY = s.y - (canopy.length * px) / 2 - 8;
+      const holes = [
+        '0000000000000000',
+        '0000000000000000',
+        '0000100010000000',
+        '0001000000100000',
+        '0000010000000000',
+        '0000011000000000',
+        '0011000000001100',
+        '0011000000001100',
+        '0000010000000000',
+        '0001000000100000',
+        '0000100010000000',
+        '0000000000000000'
+      ];
+
+      const topLeftX = s.x - (canopy[0].length * px) / 2;
+      const topLeftY = s.y - (canopy.length * px) / 2 - 12;
 
       for (let row = 0; row < canopy.length; row++) {
         for (let col = 0; col < canopy[row].length; col++) {
-          if (canopy[row][col] !== '1') continue;
-          const x = centerX + col * px;
-          const y = centerY + row * px;
-          ctx.fillStyle = (row >= 2 && row <= 4 && (col === 2 || col === 10 || col === 4 || col === 8)) || (row === 3 && (col === 1 || col === 11))
-            ? `hsl(${tree.hue} ${Math.max(22, tree.sat - 8)}% 26%)`
-            : `hsl(${tree.hue} ${tree.sat}% 34%)`;
+          const cell = canopy[row][col];
+          if (cell === '0') continue;
+
+          const x = topLeftX + col * px;
+          const y = topLeftY + row * px;
+          const hole = holes[row][col] === '1';
+          const light = (row >= 4 && row <= 8 && (col >= 2 && col <= 5 || col >= 9 && col <= 12)) || (row >= 2 && row <= 5 && col >= 6 && col <= 9);
+
+          if (hole) {
+            ctx.fillStyle = '#091012';
+            ctx.fillRect(x, y, px, px);
+            continue;
+          }
+
+          ctx.fillStyle = light ? `hsl(${tree.hue} ${Math.max(28, tree.sat - 6)}% 33%)` : `hsl(${tree.hue} ${tree.sat}% 32%)`;
           ctx.fillRect(x, y, px, px);
         }
       }
 
-      const trunkW = Math.max(10, Math.round(tree.r * 0.35));
-      const trunkH = Math.max(26, Math.round(tree.r * 1.5));
+      const trunkW = Math.max(8, Math.round(tree.r * 0.24));
+      const trunkH = Math.max(22, Math.round(tree.r * 1.45));
       const trunkX = s.x - trunkW / 2;
-      const trunkY = s.y + 8;
+      const trunkY = s.y + 14;
 
-      ctx.fillStyle = '#5f3b22';
+      ctx.fillStyle = '#5a3822';
       ctx.fillRect(trunkX, trunkY, trunkW, trunkH);
-      ctx.fillStyle = '#7b4d2c';
-      ctx.fillRect(trunkX + 2, trunkY + 4, trunkW - 4, trunkH - 10);
+      ctx.fillStyle = '#734d2b';
+      ctx.fillRect(trunkX + 1, trunkY + 2, trunkW - 2, trunkH - 4);
 
-      ctx.fillStyle = '#2d6f39';
-      ctx.fillRect(s.x - trunkW * 0.8, s.y + trunkH + 6, trunkW + 12, Math.max(8, Math.round(tree.r * 0.25)));
+      const baseW = Math.max(18, trunkW + 10);
+      const baseH = Math.max(8, Math.round(tree.r * 0.22));
+      ctx.fillStyle = '#2e743a';
+      ctx.fillRect(s.x - baseW / 2, s.y + trunkH + 10, baseW, baseH);
     }
 
     let lastTime = performance.now();
