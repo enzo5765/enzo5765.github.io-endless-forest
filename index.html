@@ -151,6 +151,29 @@
       return best;
     }
 
+    function getNearestTreeToPlayer() {
+      const pxMin = player.x - (CHOP_REACH + 120), pxMax = player.x + (CHOP_REACH + 120);
+      const pyMin = player.y - (CHOP_REACH + 120), pyMax = player.y + (CHOP_REACH + 120);
+      const minCx = Math.floor(pxMin / CHUNK_SIZE);
+      const maxCx = Math.floor(pxMax / CHUNK_SIZE);
+      const minCy = Math.floor(pyMin / CHUNK_SIZE);
+      const maxCy = Math.floor(pyMax / CHUNK_SIZE);
+      let best = null, bestDist = Infinity;
+      for (let cx = minCx; cx <= maxCx; cx++) {
+        for (let cy = minCy; cy <= maxCy; cy++) {
+          const list = chunks.get(chunkKey(cx,cy));
+          if (!list) continue;
+          for (const t of list) {
+            const d = Math.hypot(t.x - player.x, t.y - player.y);
+            if (d < bestDist && d <= CHOP_REACH + t.r) {
+              best = t; bestDist = d;
+            }
+          }
+        }
+      }
+      return best;
+    }
+
     // left click = chop, right click = place wood
     canvas.addEventListener('mousedown', (e) => {
       const rect = canvas.getBoundingClientRect();
@@ -160,19 +183,15 @@
       const wy = camY + (sy - canvas.height/2);
 
       if (e.button === 0) {
-        // left: try to start chopping if clicking near a tree
-        const tree = getTreeAtWorldPos(wx, wy);
-        if (tree) {
-          isMouseDown = true;
-          chopTarget = tree;
-        }
+        isMouseDown = true;
+        let tree = getNearestTreeToPlayer();
+        if (!tree) tree = getTreeAtWorldPos(wx, wy);
+        chopTarget = tree;
       } else if (e.button === 2) {
-        // right: place wood pile at location if we have wood
         dropWoodAt(wx, wy);
       }
     });
 
-    // prevent context menu
     window.addEventListener('contextmenu', (e) => e.preventDefault());
 
     window.addEventListener('mouseup', (e) => {
@@ -214,7 +233,7 @@
       for (const t of nearby) {
         const dx = newX - t.x, dy = newY - t.y;
         const dist = Math.hypot(dx,dy);
-        const minDist = player.r + t.r * 0.9; // slight overlap tolerance
+        const minDist = player.r + t.r * 0.9;
         if (dist < minDist && dist > 0.0001) {
           const overlap = minDist - dist;
           const nx = dx / dist, ny = dy / dist;
@@ -244,7 +263,6 @@
       const s = worldToScreen(wp.x, wp.y);
       ctx.save();
       ctx.translate(s.x, s.y);
-      // simple stacked logs
       ctx.fillStyle = '#8a5a2b';
       ctx.beginPath(); ctx.ellipse(0, 0, 10, 5, 0, 0, Math.PI*2); ctx.fill();
       ctx.fillStyle = '#6d4220';
@@ -256,27 +274,21 @@
       const s = worldToScreen(tree.x, tree.y);
       const trunkH = Math.max(22, Math.round(tree.r * 1.2));
       const trunkW = Math.max(8, Math.round(tree.r * 0.28));
-      // canopy made of smooth overlapping circles rather than pixel blocks
       const canopyColor = (tL) => `hsl(${tree.hue} ${tree.sat}% ${tL}%)`;
-      // draw shadow under canopy
       ctx.beginPath(); ctx.fillStyle = 'rgba(0,0,0,0.16)'; ctx.ellipse(s.x, s.y + 8, tree.r*0.9, tree.r*0.45, 0, 0, Math.PI*2); ctx.fill();
-      // canopy circles
       ctx.fillStyle = canopyColor(32);
       ctx.beginPath(); ctx.ellipse(s.x, s.y - tree.r*0.2, tree.r*0.9, tree.r*0.8, 0, 0, Math.PI*2); ctx.fill();
       ctx.fillStyle = canopyColor(36);
       ctx.beginPath(); ctx.ellipse(s.x - tree.r*0.45, s.y, tree.r*0.65, tree.r*0.6, 0, 0, Math.PI*2); ctx.fill();
       ctx.beginPath(); ctx.ellipse(s.x + tree.r*0.45, s.y, tree.r*0.65, tree.r*0.6, 0, 0, Math.PI*2); ctx.fill();
-      // highlights
       ctx.fillStyle = canopyColor(46);
       ctx.beginPath(); ctx.ellipse(s.x - tree.r*0.15, s.y - tree.r*0.35, tree.r*0.35, tree.r*0.25, 0, 0, Math.PI*2); ctx.fill();
 
-      // trunk
       ctx.fillStyle = '#5a3822';
       ctx.fillRect(s.x - trunkW/2, s.y + 6, trunkW, trunkH);
       ctx.fillStyle = '#734d2b';
       ctx.fillRect(s.x - trunkW/2 + 2, s.y + 8, trunkW - 4, trunkH - 6);
 
-      // base grass
       ctx.fillStyle = '#234e2a';
       ctx.fillRect(s.x - tree.r*0.6, s.y + trunkH + 6, tree.r*1.2, Math.max(6, Math.round(tree.r*0.18)));
     }
@@ -286,20 +298,13 @@
       const x = pScreen.x;
       const y = pScreen.y;
 
-      // shadow
       ctx.beginPath(); ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.ellipse(x + 2, y + 15, 9, 5, 0, 0, Math.PI * 2); ctx.fill();
 
-      // hair
       ctx.fillStyle = '#2a211d'; ctx.fillRect(x - 5, y - 18, 10, 3); ctx.fillRect(x - 6, y - 15, 12, 2);
-      // head
       ctx.fillStyle = '#f0c9a6'; ctx.fillRect(x - 4, y - 15, 8, 8); ctx.fillStyle = '#d7a77e'; ctx.fillRect(x - 3, y - 12, 6, 6);
-      // torso
       ctx.fillStyle = '#4d7ac7'; ctx.fillRect(x - 5, y - 6, 10, 9); ctx.fillStyle = '#2b4b8f'; ctx.fillRect(x - 4, y - 4, 8, 5);
-      // arms
       ctx.fillStyle = '#f0c9a6'; ctx.fillRect(x - 7, y - 5, 2, 8); ctx.fillRect(x + 5, y - 5, 2, 8);
-      // legs
       ctx.fillStyle = '#1b1d24'; ctx.fillRect(x - 4, y + 3, 3, 9); ctx.fillRect(x + 1, y + 3, 3, 9);
-      // boots
       ctx.fillStyle = '#383b45'; ctx.fillRect(x - 5, y + 11, 4, 2); ctx.fillRect(x + 1, y + 11, 4, 2);
     }
 
@@ -328,8 +333,9 @@
       // chopping
       if (isMouseDown && chopTarget) {
         const dist = Math.hypot(chopTarget.x - player.x, chopTarget.y - player.y);
-        if (dist > CHOP_REACH + chopTarget.r + 8) { chopTarget = null; }
-        else {
+        if (dist > CHOP_REACH + chopTarget.r + 8) {
+          chopTarget = null;
+        } else {
           chopTarget.hp -= CHOP_RATE * dt;
           if (chopTarget.hp <= 0) {
             const yieldAmt = Math.max(1, Math.round(chopTarget.r / 8));
@@ -337,8 +343,13 @@
             updateWoodUI();
             removeTree(chopTarget);
             chopTarget = null;
+            if (isMouseDown) {
+              chopTarget = getNearestTreeToPlayer();
+            }
           }
         }
+      } else if (isMouseDown && !chopTarget) {
+        chopTarget = getNearestTreeToPlayer();
       }
 
       const resolved = resolveCollisions(player.x, player.y);
@@ -346,7 +357,6 @@
 
       drawBackground();
 
-      // subtle grid lines
       ctx.save(); ctx.globalAlpha = 0.06; ctx.strokeStyle = '#0e2f1a';
       const gridSize = CHUNK_SIZE;
       const startX = Math.floor((camX - canvas.width/2) / gridSize) * gridSize;
