@@ -34,7 +34,6 @@
 
     // Utilities: deterministic hash -> pseudo random in [0,1)
     function hashFloat(a,b,seed=0) {
-      // mix coordinates into 32-bit unsigned, then multiply and scramble
       let n = (a * 374761393 + b * 668265263 + seed * 2654435761) >>> 0;
       n = (n ^ (n >>> 13)) >>> 0;
       n = Math.imul(n, 1274126177) >>> 0;
@@ -42,8 +41,8 @@
     }
 
     // World/chunk settings
-    const CHUNK_SIZE = 512; // pixels per chunk
-    const chunks = new Map(); // key: "cx,cy" -> array of trees
+    const CHUNK_SIZE = 512;
+    const chunks = new Map();
 
     function chunkKey(cx,cy){ return cx + ',' + cy; }
 
@@ -51,15 +50,13 @@
       const key = chunkKey(cx,cy);
       if (chunks.has(key)) return;
       const trees = [];
-      // density varies per chunk
-      const density = 6 + Math.floor(hashFloat(cx,cy,1) * 22); // between ~6 and 28
+      const density = 6 + Math.floor(hashFloat(cx,cy,1) * 22);
       for (let i = 0; i < density; i++) {
         const rx = hashFloat(cx,cy,i+3);
         const ry = hashFloat(cx,cy,i+7);
         const px = cx*CHUNK_SIZE + rx*CHUNK_SIZE;
         const py = cy*CHUNK_SIZE + ry*CHUNK_SIZE;
-        const size = 18 + Math.floor(hashFloat(cx,cy,i+11) * 36); // tree radius
-        // slight color variation
+        const size = 18 + Math.floor(hashFloat(cx,cy,i+11) * 36);
         const hue = 100 + Math.floor(hashFloat(cx,cy,i+17) * 40);
         const sat = 40 + Math.floor(hashFloat(cx,cy,i+19) * 30);
         trees.push({ x: px, y: py, r: size, hue, sat });
@@ -67,7 +64,6 @@
       chunks.set(key, trees);
     }
 
-    // ensure chunks in viewport are generated
     function ensureVisibleChunks(camX, camY, w, h) {
       const halfW = w/2, halfH = h/2;
       const left = camX - halfW - CHUNK_SIZE;
@@ -85,19 +81,16 @@
       }
     }
 
-    // Player
     const player = {
       x: 0,
       y: 0,
       r: 10,
-      speed: 180, // px/sec
+      speed: 180,
       runMultiplier: 1.9
     };
 
-    // Camera: centered on player
     let camX = player.x, camY = player.y;
 
-    // Input
     const keys = {};
     addEventListener('keydown', (e)=> {
       keys[e.key.toLowerCase()] = true;
@@ -109,7 +102,6 @@
       keys[e.key.toLowerCase()] = false;
     });
 
-    // Collision: simple circle collision with trees
     function resolveCollisions(px,py) {
       const nearby = [];
       const pxMin = px - 150, pxMax = px + 150, pyMin = py - 150, pyMax = py + 150;
@@ -134,21 +126,17 @@
         const minDist = player.r + t.r;
         if (dist < minDist && dist > 0.0001) {
           const overlap = minDist - dist;
-          // push player out along vector (weighted to avoid jitter)
           const nx = dx / dist, ny = dy / dist;
           newX += nx * overlap;
           newY += ny * overlap;
         } else if (dist === 0) {
-          // identical pos, push randomly
           newX += minDist;
         }
       }
       return { x: newX, y: newY };
     }
 
-    // Draw helpers
     function drawBackground() {
-      // subtle patterned background with per-chunk shading
       const w = canvas.width, h = canvas.height;
       const grd = ctx.createLinearGradient(0,0,0,h);
       grd.addColorStop(0, '#072a16');
@@ -161,12 +149,54 @@
       return { x: Math.floor((wx - camX) + canvas.width/2), y: Math.floor((wy - camY) + canvas.height/2) };
     }
 
+    function drawTreeSprite(tree) {
+      const s = worldToScreen(tree.x, tree.y);
+      const px = Math.max(4, Math.round(tree.r / 5));
+
+      const canopy = [
+        '0001111111000',
+        '0111111111100',
+        '1111111111110',
+        '1111111111110',
+        '0111111111100',
+        '0011111111000',
+        '0001111110000'
+      ];
+
+      const centerX = s.x - (canopy[0].length * px) / 2;
+      const centerY = s.y - (canopy.length * px) / 2 - 8;
+
+      for (let row = 0; row < canopy.length; row++) {
+        for (let col = 0; col < canopy[row].length; col++) {
+          if (canopy[row][col] !== '1') continue;
+          const x = centerX + col * px;
+          const y = centerY + row * px;
+          ctx.fillStyle = (row >= 2 && row <= 4 && (col === 2 || col === 10 || col === 4 || col === 8)) || (row === 3 && (col === 1 || col === 11))
+            ? `hsl(${tree.hue} ${Math.max(22, tree.sat - 8)}% 26%)`
+            : `hsl(${tree.hue} ${tree.sat}% 34%)`;
+          ctx.fillRect(x, y, px, px);
+        }
+      }
+
+      const trunkW = Math.max(10, Math.round(tree.r * 0.35));
+      const trunkH = Math.max(26, Math.round(tree.r * 1.5));
+      const trunkX = s.x - trunkW / 2;
+      const trunkY = s.y + 8;
+
+      ctx.fillStyle = '#5f3b22';
+      ctx.fillRect(trunkX, trunkY, trunkW, trunkH);
+      ctx.fillStyle = '#7b4d2c';
+      ctx.fillRect(trunkX + 2, trunkY + 4, trunkW - 4, trunkH - 10);
+
+      ctx.fillStyle = '#2d6f39';
+      ctx.fillRect(s.x - trunkW * 0.8, s.y + trunkH + 6, trunkW + 12, Math.max(8, Math.round(tree.r * 0.25)));
+    }
+
     let lastTime = performance.now();
     function loop(now) {
-      const dt = Math.min(0.05, (now - lastTime) / 1000); // cap dt to avoid large jumps
+      const dt = Math.min(0.05, (now - lastTime) / 1000);
       lastTime = now;
 
-      // update player velocity from input
       let vx = 0, vy = 0;
       if (keys['w'] || keys['arrowup']) vy -= 1;
       if (keys['s'] || keys['arrowdown']) vy += 1;
@@ -181,20 +211,16 @@
       player.x += vx * spd * dt;
       player.y += vy * spd * dt;
 
-      // ensure chunks exist around camera target (which follows player)
-      camX += (player.x - camX) * Math.min(1, 8*dt); // smooth camera
+      camX += (player.x - camX) * Math.min(1, 8*dt);
       camY += (player.y - camY) * Math.min(1, 8*dt);
 
       ensureVisibleChunks(camX, camY, canvas.width, canvas.height);
 
-      // resolve collisions after movement
       const resolved = resolveCollisions(player.x, player.y);
       player.x = resolved.x; player.y = resolved.y;
 
-      // draw scene
       drawBackground();
 
-      // draw ground texture: light noise per chunk lines
       ctx.save();
       ctx.globalAlpha = 0.06;
       ctx.strokeStyle = '#0e2f1a';
@@ -211,7 +237,6 @@
       }
       ctx.restore();
 
-      // draw trees from visible chunks, order by y to give depth
       const visibleTrees = [];
       const left = camX - canvas.width/2 - CHUNK_SIZE;
       const right = camX + canvas.width/2 + CHUNK_SIZE;
@@ -233,45 +258,21 @@
       }
       visibleTrees.sort((a,b) => a.y - b.y);
       for (const t of visibleTrees) {
-        const s = worldToScreen(t.x, t.y);
-        // trunk
-        const trunkW = Math.max(4, Math.floor(t.r * 0.3));
-        ctx.fillStyle = '#5c3b1a';
-        ctx.fillRect(s.x - trunkW/2, s.y - t.r*0.15, trunkW, t.r*0.3);
-        // canopy shadow
-        ctx.beginPath();
-        ctx.fillStyle = 'rgba(0,0,0,0.06)';
-        ctx.ellipse(s.x + 6, s.y + t.r*0.6, t.r*0.8, t.r*0.35, 0, 0, Math.PI*2);
-        ctx.fill();
-        // canopy
-        ctx.beginPath();
-        ctx.fillStyle = `hsl(${t.hue} ${t.sat}% 30%)`;
-        ctx.arc(s.x, s.y - t.r*0.2, t.r, 0, Math.PI*2);
-        ctx.fill();
-        // highlight
-        ctx.beginPath();
-        ctx.fillStyle = `hsl(${t.hue} ${Math.min(60,t.sat+10)}% 45%)`;
-        ctx.arc(s.x - t.r*0.2, s.y - t.r*0.4, t.r*0.45, 0, Math.PI*2);
-        ctx.fill();
+        drawTreeSprite(t);
       }
 
-      // draw player
       const pScreen = worldToScreen(player.x, player.y);
-      // shadow
       ctx.beginPath();
       ctx.fillStyle = 'rgba(0,0,0,0.25)';
       ctx.ellipse(pScreen.x + 6, pScreen.y + player.r*0.9, player.r*1.1, player.r*0.55, 0, 0, Math.PI*2);
       ctx.fill();
-      // body
       ctx.beginPath();
       ctx.fillStyle = '#ff6b6b';
       ctx.arc(pScreen.x, pScreen.y - player.r*0.2, player.r, 0, Math.PI*2);
       ctx.fill();
-      // center point
       ctx.fillStyle = '#fff';
       ctx.fillRect(pScreen.x-1, pScreen.y-1 - player.r*0.2, 2, 2);
 
-      // HUD: coordinates
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
       ctx.fillRect(12, canvas.height-56, 220, 44);
       ctx.fillStyle = '#dfffdc';
@@ -282,11 +283,9 @@
       requestAnimationFrame(loop);
     }
 
-    // kick off initial generation and loop
     ensureVisibleChunks(camX, camY, canvas.width, canvas.height);
     requestAnimationFrame(loop);
 
-    // simple pointer recenter - allow clicking to set player position (for testing)
     canvas.addEventListener('dblclick', (e) => {
       const rect = canvas.getBoundingClientRect();
       const sx = e.clientX - rect.left;
@@ -297,7 +296,6 @@
       ensureVisibleChunks(camX, camY, canvas.width, canvas.height);
     });
 
-    // Prevent arrow keys from scrolling the page
     window.addEventListener("keydown", function(e) {
       if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].indexOf(e.code) > -1) {
         e.preventDefault();
