@@ -223,6 +223,50 @@
       ctx.fillRect(s.x - baseW / 2, s.y + trunkH + 10, baseW, baseH);
     }
 
+    function drawPlayerSprite() {
+      const pScreen = worldToScreen(player.x, player.y);
+      const x = pScreen.x;
+      const y = pScreen.y;
+
+      // shadow
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.ellipse(x + 2, y + 15, 9, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // hair
+      ctx.fillStyle = '#2a211d';
+      ctx.fillRect(x - 5, y - 18, 10, 3);
+      ctx.fillRect(x - 6, y - 15, 12, 2);
+
+      // head
+      ctx.fillStyle = '#f0c9a6';
+      ctx.fillRect(x - 4, y - 15, 8, 8);
+      ctx.fillStyle = '#d7a77e';
+      ctx.fillRect(x - 3, y - 12, 6, 6);
+
+      // torso
+      ctx.fillStyle = '#4d7ac7';
+      ctx.fillRect(x - 5, y - 6, 10, 9);
+      ctx.fillStyle = '#2b4b8f';
+      ctx.fillRect(x - 4, y - 4, 8, 5);
+
+      // arms
+      ctx.fillStyle = '#f0c9a6';
+      ctx.fillRect(x - 7, y - 5, 2, 8);
+      ctx.fillRect(x + 5, y - 5, 2, 8);
+
+      // legs
+      ctx.fillStyle = '#1b1d24';
+      ctx.fillRect(x - 4, y + 3, 3, 9);
+      ctx.fillRect(x + 1, y + 3, 3, 9);
+
+      // boots
+      ctx.fillStyle = '#383b45';
+      ctx.fillRect(x - 5, y + 11, 4, 2);
+      ctx.fillRect(x + 1, y + 11, 4, 2);
+    }
+
     let lastTime = performance.now();
     function loop(now) {
       const dt = Math.min(0.05, (now - lastTime) / 1000);
@@ -292,17 +336,7 @@
         drawTreeSprite(t);
       }
 
-      const pScreen = worldToScreen(player.x, player.y);
-      ctx.beginPath();
-      ctx.fillStyle = 'rgba(0,0,0,0.25)';
-      ctx.ellipse(pScreen.x + 6, pScreen.y + player.r*0.9, player.r*1.1, player.r*0.55, 0, 0, Math.PI*2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.fillStyle = '#ff6b6b';
-      ctx.arc(pScreen.x, pScreen.y - player.r*0.2, player.r, 0, Math.PI*2);
-      ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(pScreen.x-1, pScreen.y-1 - player.r*0.2, 2, 2);
+      drawPlayerSprite();
 
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
       ctx.fillRect(12, canvas.height-56, 220, 44);
