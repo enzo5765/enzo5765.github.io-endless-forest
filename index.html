@@ -14,13 +14,15 @@
       background: rgba(0,0,0,0.15); padding:8px 10px; border-radius:8px;
       backdrop-filter: blur(4px);
     }
+    #ui div { line-height:1.2 }
     #credits { position: absolute; right:12px; bottom:12px; color:#bfe; font-size:12px; opacity:0.8; }
   </style>
 </head>
 <body>
   <canvas id="c"></canvas>
   <div id="ui">
-    Controls: WASD / Arrow keys — Move. Shift = run. R = recenter.
+    <div>Controls: WASD / Arrow keys — Move. Shift = run. R = recenter. Hold left click to chop trees.</div>
+    <div id="inventory" style="margin-top:6px; font-weight:600">Wood: <span id="woodCount">0</span></div>
   </div>
   <div id="credits">Endless Forest demo — deterministic procedural chunks</div>
 
@@ -59,7 +61,8 @@
         const size = 18 + Math.floor(hashFloat(cx,cy,i+11) * 36);
         const hue = 100 + Math.floor(hashFloat(cx,cy,i+17) * 40);
         const sat = 40 + Math.floor(hashFloat(cx,cy,i+19) * 30);
-        trees.push({ x: px, y: py, r: size, hue, sat });
+        const hp = Math.round(size * 6);
+        trees.push({ x: px, y: py, r: size, hue, sat, hp });
       }
       chunks.set(key, trees);
     }
@@ -86,7 +89,8 @@
       y: 0,
       r: 10,
       speed: 180,
-      runMultiplier: 1.9
+      runMultiplier: 1.9,
+      wood: 0
     };
 
     let camX = player.x, camY = player.y;
@@ -101,6 +105,56 @@
     addEventListener('keyup', (e)=> {
       keys[e.key.toLowerCase()] = false;
     });
+
+    let isMouseDown = false;
+    let chopTarget = null;
+    const CHOP_REACH = 80;
+    const CHOP_RATE = 140;
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      isMouseDown = true;
+      let best = null, bestDist = Infinity;
+      const pxMin = player.x - (CHOP_REACH + 200), pxMax = player.x + (CHOP_REACH + 200);
+      const pyMin = player.y - (CHOP_REACH + 200), pyMax = player.y + (CHOP_REACH + 200);
+      const minCx = Math.floor(pxMin / CHUNK_SIZE);
+      const maxCx = Math.floor(pxMax / CHUNK_SIZE);
+      const minCy = Math.floor(pyMin / CHUNK_SIZE);
+      const maxCy = Math.floor(pyMax / CHUNK_SIZE);
+      for (let cx = minCx; cx <= maxCx; cx++) {
+        for (let cy = minCy; cy <= maxCy; cy++) {
+          const list = chunks.get(chunkKey(cx,cy));
+          if (!list) continue;
+          for (const t of list) {
+            const d = Math.hypot(t.x - player.x, t.y - player.y);
+            if (d < bestDist && d <= CHOP_REACH + t.r) {
+              best = t; bestDist = d;
+            }
+          }
+        }
+      }
+      chopTarget = best;
+    });
+
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 0) {
+        isMouseDown = false;
+        chopTarget = null;
+      }
+    });
+    canvas.addEventListener('mouseleave', () => {
+      isMouseDown = false;
+      chopTarget = null;
+    });
+
+    function removeTree(t) {
+      const cx = Math.floor(t.x / CHUNK_SIZE);
+      const cy = Math.floor(t.y / CHUNK_SIZE);
+      const list = chunks.get(chunkKey(cx,cy));
+      if (!list) return;
+      const idx = list.indexOf(t);
+      if (idx !== -1) list.splice(idx,1);
+    }
 
     function resolveCollisions(px,py) {
       const nearby = [];
@@ -228,40 +282,33 @@
       const x = pScreen.x;
       const y = pScreen.y;
 
-      // shadow
       ctx.beginPath();
       ctx.fillStyle = 'rgba(0,0,0,0.25)';
       ctx.ellipse(x + 2, y + 15, 9, 5, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      // hair
       ctx.fillStyle = '#2a211d';
       ctx.fillRect(x - 5, y - 18, 10, 3);
       ctx.fillRect(x - 6, y - 15, 12, 2);
 
-      // head
       ctx.fillStyle = '#f0c9a6';
       ctx.fillRect(x - 4, y - 15, 8, 8);
       ctx.fillStyle = '#d7a77e';
       ctx.fillRect(x - 3, y - 12, 6, 6);
 
-      // torso
       ctx.fillStyle = '#4d7ac7';
       ctx.fillRect(x - 5, y - 6, 10, 9);
       ctx.fillStyle = '#2b4b8f';
       ctx.fillRect(x - 4, y - 4, 8, 5);
 
-      // arms
       ctx.fillStyle = '#f0c9a6';
       ctx.fillRect(x - 7, y - 5, 2, 8);
       ctx.fillRect(x + 5, y - 5, 2, 8);
 
-      // legs
       ctx.fillStyle = '#1b1d24';
       ctx.fillRect(x - 4, y + 3, 3, 9);
       ctx.fillRect(x + 1, y + 3, 3, 9);
 
-      // boots
       ctx.fillStyle = '#383b45';
       ctx.fillRect(x - 5, y + 11, 4, 2);
       ctx.fillRect(x + 1, y + 11, 4, 2);
@@ -290,6 +337,22 @@
       camY += (player.y - camY) * Math.min(1, 8*dt);
 
       ensureVisibleChunks(camX, camY, canvas.width, canvas.height);
+
+      if (isMouseDown && chopTarget) {
+        const dist = Math.hypot(chopTarget.x - player.x, chopTarget.y - player.y);
+        if (dist > CHOP_REACH + chopTarget.r + 8) {
+          chopTarget = null;
+        } else {
+          chopTarget.hp -= CHOP_RATE * dt;
+          if (chopTarget.hp <= 0) {
+            const woodGain = Math.max(1, Math.round(chopTarget.r / 8));
+            player.wood += woodGain;
+            document.getElementById('woodCount').textContent = player.wood;
+            removeTree(chopTarget);
+            chopTarget = null;
+          }
+        }
+      }
 
       const resolved = resolveCollisions(player.x, player.y);
       player.x = resolved.x; player.y = resolved.y;
@@ -336,6 +399,19 @@
         drawTreeSprite(t);
       }
 
+      if (chopTarget) {
+        const s = worldToScreen(chopTarget.x, chopTarget.y);
+        const totalHp = Math.round(chopTarget.r * 6);
+        const pct = Math.max(0, Math.min(1, (totalHp - chopTarget.hp) / totalHp));
+        const barW = 64, barH = 8;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(s.x - barW/2, s.y - 60, barW, barH);
+        ctx.fillStyle = '#b86f3c';
+        ctx.fillRect(s.x - barW/2 + 1, s.y - 60 + 1, (barW - 2) * pct, barH - 2);
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.strokeRect(s.x - barW/2, s.y - 60, barW, barH);
+      }
+
       drawPlayerSprite();
 
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
@@ -366,6 +442,8 @@
         e.preventDefault();
       }
     }, false);
+
+    window.addEventListener('contextmenu', (e) => e.preventDefault());
 
   })();
   </script>
