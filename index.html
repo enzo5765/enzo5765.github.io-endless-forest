@@ -21,10 +21,10 @@
 <body>
   <canvas id="c"></canvas>
   <div id="ui">
-    <div>Controls: WASD / Arrow keys — Move. Shift = run. R = recenter. Hold left click to chop trees.</div>
+    <div>Controls: WASD / Arrow keys — Move. Shift = run. R = recenter. Hold left click near a tree to chop. Right click to place wood.</div>
     <div id="inventory" style="margin-top:6px; font-weight:600">Wood: <span id="woodCount">0</span></div>
   </div>
-  <div id="credits">Endless Forest demo — deterministic procedural chunks</div>
+  <div id="credits">Endless Forest demo — smoother trees & wood placement</div>
 
   <script>
   (function () {
@@ -45,8 +45,11 @@
     // World/chunk settings
     const CHUNK_SIZE = 512;
     const chunks = new Map();
+    const woodPiles = [];
 
     function chunkKey(cx,cy){ return cx + ',' + cy; }
+
+    function updateWoodUI() { document.getElementById('woodCount').textContent = player.wood; }
 
     function generateChunk(cx,cy) {
       const key = chunkKey(cx,cy);
@@ -54,10 +57,15 @@
       const trees = [];
       const density = 6 + Math.floor(hashFloat(cx,cy,1) * 22);
       for (let i = 0; i < density; i++) {
+        // spread trees more naturally with jitter and avoid blocky alignment
         const rx = hashFloat(cx,cy,i+3);
         const ry = hashFloat(cx,cy,i+7);
-        const px = cx*CHUNK_SIZE + rx*CHUNK_SIZE;
-        const py = cy*CHUNK_SIZE + ry*CHUNK_SIZE;
+        // use sqrt distribution to cluster slightly towards center for variety
+        const jx = (rx < 0.5 ? -1 : 1) * Math.pow(Math.abs(rx - 0.5) * 2, 1.1) * 0.5 + rx;
+        const jy = (ry < 0.5 ? -1 : 1) * Math.pow(Math.abs(ry - 0.5) * 2, 1.1) * 0.5 + ry;
+        // position across chunk plus small sub-pixel jitter
+        const px = cx*CHUNK_SIZE + jx*CHUNK_SIZE + (hashFloat(cx,cy,i+23)-0.5)*8;
+        const py = cy*CHUNK_SIZE + jy*CHUNK_SIZE + (hashFloat(cx,cy,i+29)-0.5)*8;
         const size = 18 + Math.floor(hashFloat(cx,cy,i+11) * 36);
         const hue = 100 + Math.floor(hashFloat(cx,cy,i+17) * 40);
         const sat = 40 + Math.floor(hashFloat(cx,cy,i+19) * 30);
@@ -106,35 +114,66 @@
       keys[e.key.toLowerCase()] = false;
     });
 
+    // chopping state
     let isMouseDown = false;
     let chopTarget = null;
-    const CHOP_REACH = 80;
-    const CHOP_RATE = 140;
+    const CHOP_REACH = 80; // world units
+    const CHOP_RATE = 140; // HP/s
 
-    canvas.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return;
-      isMouseDown = true;
-      let best = null, bestDist = Infinity;
-      const pxMin = player.x - (CHOP_REACH + 200), pxMax = player.x + (CHOP_REACH + 200);
-      const pyMin = player.y - (CHOP_REACH + 200), pyMax = player.y + (CHOP_REACH + 200);
+    function dropWoodAt(wx, wy) {
+      if (player.wood <= 0) return false;
+      player.wood -= 1;
+      woodPiles.push({ x: wx, y: wy, amount: 1, r: 9 });
+      updateWoodUI();
+      return true;
+    }
+
+    function getTreeAtWorldPos(wx, wy) {
+      const pxMin = wx - 120, pxMax = wx + 120;
+      const pyMin = wy - 120, pyMax = wy + 120;
       const minCx = Math.floor(pxMin / CHUNK_SIZE);
       const maxCx = Math.floor(pxMax / CHUNK_SIZE);
       const minCy = Math.floor(pyMin / CHUNK_SIZE);
       const maxCy = Math.floor(pyMax / CHUNK_SIZE);
+      let best = null, bestDist = Infinity;
       for (let cx = minCx; cx <= maxCx; cx++) {
         for (let cy = minCy; cy <= maxCy; cy++) {
           const list = chunks.get(chunkKey(cx,cy));
           if (!list) continue;
           for (const t of list) {
-            const d = Math.hypot(t.x - player.x, t.y - player.y);
+            const d = Math.hypot(t.x - wx, t.y - wy);
             if (d < bestDist && d <= CHOP_REACH + t.r) {
               best = t; bestDist = d;
             }
           }
         }
       }
-      chopTarget = best;
+      return best;
+    }
+
+    // left click = chop, right click = place wood
+    canvas.addEventListener('mousedown', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const wx = camX + (sx - canvas.width/2);
+      const wy = camY + (sy - canvas.height/2);
+
+      if (e.button === 0) {
+        // left: try to start chopping if clicking near a tree
+        const tree = getTreeAtWorldPos(wx, wy);
+        if (tree) {
+          isMouseDown = true;
+          chopTarget = tree;
+        }
+      } else if (e.button === 2) {
+        // right: place wood pile at location if we have wood
+        dropWoodAt(wx, wy);
+      }
     });
+
+    // prevent context menu
+    window.addEventListener('contextmenu', (e) => e.preventDefault());
 
     window.addEventListener('mouseup', (e) => {
       if (e.button === 0) {
@@ -142,15 +181,13 @@
         chopTarget = null;
       }
     });
-    canvas.addEventListener('mouseleave', () => {
-      isMouseDown = false;
-      chopTarget = null;
-    });
+    canvas.addEventListener('mouseleave', () => { isMouseDown = false; chopTarget = null; });
 
     function removeTree(t) {
       const cx = Math.floor(t.x / CHUNK_SIZE);
       const cy = Math.floor(t.y / CHUNK_SIZE);
-      const list = chunks.get(chunkKey(cx,cy));
+      const key = chunkKey(cx,cy);
+      const list = chunks.get(key);
       if (!list) return;
       const idx = list.indexOf(t);
       if (idx !== -1) list.splice(idx,1);
@@ -177,7 +214,7 @@
       for (const t of nearby) {
         const dx = newX - t.x, dy = newY - t.y;
         const dist = Math.hypot(dx,dy);
-        const minDist = player.r + t.r;
+        const minDist = player.r + t.r * 0.9; // slight overlap tolerance
         if (dist < minDist && dist > 0.0001) {
           const overlap = minDist - dist;
           const nx = dx / dist, ny = dy / dist;
@@ -203,78 +240,45 @@
       return { x: Math.floor((wx - camX) + canvas.width/2), y: Math.floor((wy - camY) + canvas.height/2) };
     }
 
+    function drawWoodPile(wp) {
+      const s = worldToScreen(wp.x, wp.y);
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      // simple stacked logs
+      ctx.fillStyle = '#8a5a2b';
+      ctx.beginPath(); ctx.ellipse(0, 0, 10, 5, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#6d4220';
+      ctx.fillRect(-11, 2, 22, 6);
+      ctx.restore();
+    }
+
     function drawTreeSprite(tree) {
       const s = worldToScreen(tree.x, tree.y);
-      const px = Math.max(3, Math.round(tree.r / 5));
+      const trunkH = Math.max(22, Math.round(tree.r * 1.2));
+      const trunkW = Math.max(8, Math.round(tree.r * 0.28));
+      // canopy made of smooth overlapping circles rather than pixel blocks
+      const canopyColor = (tL) => `hsl(${tree.hue} ${tree.sat}% ${tL}%)`;
+      // draw shadow under canopy
+      ctx.beginPath(); ctx.fillStyle = 'rgba(0,0,0,0.16)'; ctx.ellipse(s.x, s.y + 8, tree.r*0.9, tree.r*0.45, 0, 0, Math.PI*2); ctx.fill();
+      // canopy circles
+      ctx.fillStyle = canopyColor(32);
+      ctx.beginPath(); ctx.ellipse(s.x, s.y - tree.r*0.2, tree.r*0.9, tree.r*0.8, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = canopyColor(36);
+      ctx.beginPath(); ctx.ellipse(s.x - tree.r*0.45, s.y, tree.r*0.65, tree.r*0.6, 0, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(s.x + tree.r*0.45, s.y, tree.r*0.65, tree.r*0.6, 0, 0, Math.PI*2); ctx.fill();
+      // highlights
+      ctx.fillStyle = canopyColor(46);
+      ctx.beginPath(); ctx.ellipse(s.x - tree.r*0.15, s.y - tree.r*0.35, tree.r*0.35, tree.r*0.25, 0, 0, Math.PI*2); ctx.fill();
 
-      const canopy = [
-        '0000111111110000',
-        '0001111111110000',
-        '0011111111111000',
-        '0111111111111100',
-        '0111111111111100',
-        '0111111111111100',
-        '1111111111111110',
-        '1111111111111110',
-        '0111111111111100',
-        '0011111111111000',
-        '0001111111110000',
-        '0000111111100000'
-      ];
-
-      const holes = [
-        '0000000000000000',
-        '0000000000000000',
-        '0000100010000000',
-        '0001000000100000',
-        '0000010000000000',
-        '0000011000000000',
-        '0011000000001100',
-        '0011000000001100',
-        '0000010000000000',
-        '0001000000100000',
-        '0000100010000000',
-        '0000000000000000'
-      ];
-
-      const topLeftX = s.x - (canopy[0].length * px) / 2;
-      const topLeftY = s.y - (canopy.length * px) / 2 - 12;
-
-      for (let row = 0; row < canopy.length; row++) {
-        for (let col = 0; col < canopy[row].length; col++) {
-          const cell = canopy[row][col];
-          if (cell === '0') continue;
-
-          const x = topLeftX + col * px;
-          const y = topLeftY + row * px;
-          const hole = holes[row][col] === '1';
-          const light = (row >= 4 && row <= 8 && (col >= 2 && col <= 5 || col >= 9 && col <= 12)) || (row >= 2 && row <= 5 && col >= 6 && col <= 9);
-
-          if (hole) {
-            ctx.fillStyle = '#091012';
-            ctx.fillRect(x, y, px, px);
-            continue;
-          }
-
-          ctx.fillStyle = light ? `hsl(${tree.hue} ${Math.max(28, tree.sat - 6)}% 33%)` : `hsl(${tree.hue} ${tree.sat}% 32%)`;
-          ctx.fillRect(x, y, px, px);
-        }
-      }
-
-      const trunkW = Math.max(8, Math.round(tree.r * 0.24));
-      const trunkH = Math.max(22, Math.round(tree.r * 1.45));
-      const trunkX = s.x - trunkW / 2;
-      const trunkY = s.y + 14;
-
+      // trunk
       ctx.fillStyle = '#5a3822';
-      ctx.fillRect(trunkX, trunkY, trunkW, trunkH);
+      ctx.fillRect(s.x - trunkW/2, s.y + 6, trunkW, trunkH);
       ctx.fillStyle = '#734d2b';
-      ctx.fillRect(trunkX + 1, trunkY + 2, trunkW - 2, trunkH - 4);
+      ctx.fillRect(s.x - trunkW/2 + 2, s.y + 8, trunkW - 4, trunkH - 6);
 
-      const baseW = Math.max(18, trunkW + 10);
-      const baseH = Math.max(8, Math.round(tree.r * 0.22));
-      ctx.fillStyle = '#2e743a';
-      ctx.fillRect(s.x - baseW / 2, s.y + trunkH + 10, baseW, baseH);
+      // base grass
+      ctx.fillStyle = '#234e2a';
+      ctx.fillRect(s.x - tree.r*0.6, s.y + trunkH + 6, tree.r*1.2, Math.max(6, Math.round(tree.r*0.18)));
     }
 
     function drawPlayerSprite() {
@@ -282,36 +286,21 @@
       const x = pScreen.x;
       const y = pScreen.y;
 
-      ctx.beginPath();
-      ctx.fillStyle = 'rgba(0,0,0,0.25)';
-      ctx.ellipse(x + 2, y + 15, 9, 5, 0, 0, Math.PI * 2);
-      ctx.fill();
+      // shadow
+      ctx.beginPath(); ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.ellipse(x + 2, y + 15, 9, 5, 0, 0, Math.PI * 2); ctx.fill();
 
-      ctx.fillStyle = '#2a211d';
-      ctx.fillRect(x - 5, y - 18, 10, 3);
-      ctx.fillRect(x - 6, y - 15, 12, 2);
-
-      ctx.fillStyle = '#f0c9a6';
-      ctx.fillRect(x - 4, y - 15, 8, 8);
-      ctx.fillStyle = '#d7a77e';
-      ctx.fillRect(x - 3, y - 12, 6, 6);
-
-      ctx.fillStyle = '#4d7ac7';
-      ctx.fillRect(x - 5, y - 6, 10, 9);
-      ctx.fillStyle = '#2b4b8f';
-      ctx.fillRect(x - 4, y - 4, 8, 5);
-
-      ctx.fillStyle = '#f0c9a6';
-      ctx.fillRect(x - 7, y - 5, 2, 8);
-      ctx.fillRect(x + 5, y - 5, 2, 8);
-
-      ctx.fillStyle = '#1b1d24';
-      ctx.fillRect(x - 4, y + 3, 3, 9);
-      ctx.fillRect(x + 1, y + 3, 3, 9);
-
-      ctx.fillStyle = '#383b45';
-      ctx.fillRect(x - 5, y + 11, 4, 2);
-      ctx.fillRect(x + 1, y + 11, 4, 2);
+      // hair
+      ctx.fillStyle = '#2a211d'; ctx.fillRect(x - 5, y - 18, 10, 3); ctx.fillRect(x - 6, y - 15, 12, 2);
+      // head
+      ctx.fillStyle = '#f0c9a6'; ctx.fillRect(x - 4, y - 15, 8, 8); ctx.fillStyle = '#d7a77e'; ctx.fillRect(x - 3, y - 12, 6, 6);
+      // torso
+      ctx.fillStyle = '#4d7ac7'; ctx.fillRect(x - 5, y - 6, 10, 9); ctx.fillStyle = '#2b4b8f'; ctx.fillRect(x - 4, y - 4, 8, 5);
+      // arms
+      ctx.fillStyle = '#f0c9a6'; ctx.fillRect(x - 7, y - 5, 2, 8); ctx.fillRect(x + 5, y - 5, 2, 8);
+      // legs
+      ctx.fillStyle = '#1b1d24'; ctx.fillRect(x - 4, y + 3, 3, 9); ctx.fillRect(x + 1, y + 3, 3, 9);
+      // boots
+      ctx.fillStyle = '#383b45'; ctx.fillRect(x - 5, y + 11, 4, 2); ctx.fillRect(x + 1, y + 11, 4, 2);
     }
 
     let lastTime = performance.now();
@@ -325,9 +314,7 @@
       if (keys['a'] || keys['arrowleft']) vx -= 1;
       if (keys['d'] || keys['arrowright']) vx += 1;
       const len = Math.hypot(vx,vy);
-      if (len > 0.0001) {
-        vx /= len; vy /= len;
-      }
+      if (len > 0.0001) { vx /= len; vy /= len; }
       const isRunning = keys['shift'];
       const spd = player.speed * (isRunning ? player.runMultiplier : 1);
       player.x += vx * spd * dt;
@@ -338,16 +325,16 @@
 
       ensureVisibleChunks(camX, camY, canvas.width, canvas.height);
 
+      // chopping
       if (isMouseDown && chopTarget) {
         const dist = Math.hypot(chopTarget.x - player.x, chopTarget.y - player.y);
-        if (dist > CHOP_REACH + chopTarget.r + 8) {
-          chopTarget = null;
-        } else {
+        if (dist > CHOP_REACH + chopTarget.r + 8) { chopTarget = null; }
+        else {
           chopTarget.hp -= CHOP_RATE * dt;
           if (chopTarget.hp <= 0) {
-            const woodGain = Math.max(1, Math.round(chopTarget.r / 8));
-            player.wood += woodGain;
-            document.getElementById('woodCount').textContent = player.wood;
+            const yieldAmt = Math.max(1, Math.round(chopTarget.r / 8));
+            player.wood += yieldAmt;
+            updateWoodUI();
             removeTree(chopTarget);
             chopTarget = null;
           }
@@ -359,19 +346,16 @@
 
       drawBackground();
 
-      ctx.save();
-      ctx.globalAlpha = 0.06;
-      ctx.strokeStyle = '#0e2f1a';
+      // subtle grid lines
+      ctx.save(); ctx.globalAlpha = 0.06; ctx.strokeStyle = '#0e2f1a';
       const gridSize = CHUNK_SIZE;
       const startX = Math.floor((camX - canvas.width/2) / gridSize) * gridSize;
       const startY = Math.floor((camY - canvas.height/2) / gridSize) * gridSize;
       for (let gx = startX - gridSize*2; gx < camX + canvas.width/2 + gridSize*2; gx += gridSize) {
-        const sx = (gx - camX) + canvas.width/2;
-        ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, canvas.height); ctx.stroke();
+        const sx = (gx - camX) + canvas.width/2; ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, canvas.height); ctx.stroke();
       }
       for (let gy = startY - gridSize*2; gy < camY + canvas.height/2 + gridSize*2; gy += gridSize) {
-        const sy = (gy - camY) + canvas.height/2;
-        ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(canvas.width, sy); ctx.stroke();
+        const sy = (gy - camY) + canvas.height/2; ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(canvas.width, sy); ctx.stroke();
       }
       ctx.restore();
 
@@ -395,36 +379,32 @@
         }
       }
       visibleTrees.sort((a,b) => a.y - b.y);
-      for (const t of visibleTrees) {
-        drawTreeSprite(t);
-      }
+      for (const t of visibleTrees) { drawTreeSprite(t); }
+
+      for (const wp of woodPiles) drawWoodPile(wp);
 
       if (chopTarget) {
         const s = worldToScreen(chopTarget.x, chopTarget.y);
         const totalHp = Math.round(chopTarget.r * 6);
         const pct = Math.max(0, Math.min(1, (totalHp - chopTarget.hp) / totalHp));
         const barW = 64, barH = 8;
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillRect(s.x - barW/2, s.y - 60, barW, barH);
-        ctx.fillStyle = '#b86f3c';
-        ctx.fillRect(s.x - barW/2 + 1, s.y - 60 + 1, (barW - 2) * pct, barH - 2);
-        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-        ctx.strokeRect(s.x - barW/2, s.y - 60, barW, barH);
+        ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(s.x - barW/2, s.y - 60, barW, barH);
+        ctx.fillStyle = '#b86f3c'; ctx.fillRect(s.x - barW/2 + 1, s.y - 60 + 1, (barW - 2) * pct, barH - 2);
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.strokeRect(s.x - barW/2, s.y - 60, barW, barH);
       }
 
       drawPlayerSprite();
 
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      ctx.fillRect(12, canvas.height-56, 220, 44);
-      ctx.fillStyle = '#dfffdc';
-      ctx.font = '13px system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(12, canvas.height-56, 260, 44);
+      ctx.fillStyle = '#dfffdc'; ctx.font = '13px system-ui, sans-serif';
       ctx.fillText(`Position: ${player.x.toFixed(0)}, ${player.y.toFixed(0)}`, 20, canvas.height-36);
-      ctx.fillText(`Chunks generated: ${chunks.size}`, 20, canvas.height-18);
+      ctx.fillText(`Chunks generated: ${chunks.size}  Wood: ${player.wood}`, 20, canvas.height-18);
 
       requestAnimationFrame(loop);
     }
 
     ensureVisibleChunks(camX, camY, canvas.width, canvas.height);
+    updateWoodUI();
     requestAnimationFrame(loop);
 
     canvas.addEventListener('dblclick', (e) => {
@@ -442,8 +422,6 @@
         e.preventDefault();
       }
     }, false);
-
-    window.addEventListener('contextmenu', (e) => e.preventDefault());
 
   })();
   </script>
